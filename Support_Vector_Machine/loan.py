@@ -1,42 +1,44 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
+import os
+
 from sklearn.svm import SVC
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
 
 # -----------------------------
-# App Title & Description
+# Page Config (MUST be first)
+# -----------------------------
+st.set_page_config(page_title="Smart Loan Approval System", layout="centered")
+
+# -----------------------------
+# Custom CSS
 # -----------------------------
 st.markdown(
     """
     <style>
-    /* ---------- App Background ---------- */
     .stApp {
         background: linear-gradient(135deg, #9caf88,#cbd5c0,#dfe6da);
         font-family: 'Segoe UI', sans-serif;
     }
 
-    /* ---------- Title ---------- */
     h1 {
         color: #2c3e50;
         text-align: center;
         font-weight: 700;
     }
 
-    /* ---------- Subheaders ---------- */
     h2, h3 {
         color: #34495e;
         font-weight: 600;
     }
 
-    /* ---------- Sidebar ---------- */
     section[data-testid="stSidebar"] {
         background-color: #e8f0ff;
     }
 
-    /* ---------- Buttons ---------- */
     div.stButton > button {
         background-color: #4CAF50;
         color: white;
@@ -52,33 +54,30 @@ st.markdown(
         color: white;
     }
 
-    /* ---------- Success & Error Messages ---------- */
     div[data-testid="stAlert"][role="alert"] {
         border-radius: 10px;
         font-size: 16px;
     }
 
-    /* ---------- Input Boxes ---------- */
     input, select {
         border-radius: 6px !important;
     }
 
-    /* ---------- Radio Buttons ---------- */
     div[role="radiogroup"] > label {
         font-weight: 500;
     }
-
     </style>
     """,
     unsafe_allow_html=True
 )
 
-st.set_page_config(page_title="Smart Loan Approval System", layout="centered")
-
+# -----------------------------
+# Title & Description
+# -----------------------------
 st.title("💳 Smart Loan Approval System")
 st.write(
-    "This system uses **Support Vector Machines (SVM)** to predict whether a loan will be approved "
-    "based on applicant financial details."
+    "This system uses **Support Vector Machines (SVM)** to predict loan approval "
+    "based on applicant details."
 )
 
 # -----------------------------
@@ -86,41 +85,57 @@ st.write(
 # -----------------------------
 @st.cache_data
 def load_and_prepare_data():
-    df = pd.read_csv("loan2.csv")   # make sure loan.csv is in same folder
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    csv_path = os.path.join(base_dir, "loan2.csv")  
+
+    df = pd.read_csv(csv_path)
 
     # Encode target
-    df['Loan_Status'] = df['Loan_Status'].map({'Y': 1, 'N': 0})
+    df["Loan_Status"] = df["Loan_Status"].astype(str).str.strip().map({"Y": 1, "N": 0})
 
-    # Select features
-    df = df[['ApplicantIncome', 'LoanAmount', 'Credit_History',
-             'Self_Employed', 'Property_Area', 'Loan_Status']]
+    # Select required columns
+    df = df[
+        [
+            "ApplicantIncome",
+            "LoanAmount",
+            "Credit_History",
+            "Self_Employed",
+            "Property_Area",
+            "Loan_Status",
+        ]
+    ]
+
+    # Fill NaNs
+    df["LoanAmount"] = df["LoanAmount"].fillna(df["LoanAmount"].median())
+    df["Credit_History"] = df["Credit_History"].fillna(df["Credit_History"].median())
+    df["Self_Employed"] = df["Self_Employed"].fillna(df["Self_Employed"].mode()[0])
 
     # Encode categorical
-    df['Self_Employed'] = df['Self_Employed'].map({'Yes': 1, 'No': 0})
-    df = pd.get_dummies(df, columns=['Property_Area'], drop_first=True)
+    df["Self_Employed"] = df["Self_Employed"].map({"Yes": 1, "No": 0})
+    df = pd.get_dummies(df, columns=["Property_Area"], drop_first=True)
 
-    X = df.drop('Loan_Status', axis=1)
-    y = df['Loan_Status']
+    # Features & Target
+    X = df.drop("Loan_Status", axis=1)
+    y = df["Loan_Status"]
 
-    # Split
+    # Train test split
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42
     )
 
-    # Impute
-    imputer = SimpleImputer(strategy='median')
+    # Imputer + Scaling
+    imputer = SimpleImputer(strategy="median")
     X_train = imputer.fit_transform(X_train)
     X_test = imputer.transform(X_test)
 
-    # Scale
     scaler = StandardScaler()
     X_train = scaler.fit_transform(X_train)
     X_test = scaler.transform(X_test)
 
-    return X_train, X_test, y_train, y_test, imputer, scaler, X.columns
+    return X_train, X_test, y_train, y_test, imputer, scaler
 
 
-X_train, X_test, y_train, y_test, imputer, scaler, feature_names = load_and_prepare_data()
+X_train, X_test, y_train, y_test, imputer, scaler = load_and_prepare_data()
 
 # -----------------------------
 # Sidebar Inputs
@@ -136,13 +151,11 @@ credit = 1 if credit == "Yes" else 0
 employment = st.sidebar.selectbox("Employment Status", ["Yes", "No"])
 employment = 1 if employment == "Yes" else 0
 
-property_area = st.sidebar.selectbox(
-    "Property Area", ["Urban", "Semiurban", "Rural"]
-)
+property_area = st.sidebar.selectbox("Property Area", ["Urban", "Semiurban", "Rural"])
 
-# Property area encoding
-prop_urban = 1 if property_area == "Urban" else 0
+# Property area encoding (drop_first=True → Rural base)
 prop_semiurban = 1 if property_area == "Semiurban" else 0
+prop_urban = 1 if property_area == "Urban" else 0
 
 # -----------------------------
 # Model Selection
@@ -155,21 +168,19 @@ kernel = st.radio(
 )
 
 if kernel == "Linear SVM":
-    model = SVC(kernel="linear", probability=True)
+    model = SVC(kernel="linear", C=1, probability=True)
 elif kernel == "Polynomial SVM":
-    model = SVC(kernel="poly", degree=3, probability=True)
+    model = SVC(kernel="poly", degree=3, C=1, probability=True)
 else:
-    model = SVC(kernel="rbf", probability=True)
+    model = SVC(kernel="rbf", C=1, probability=True)
 
 # Train selected model
 model.fit(X_train, y_train)
 
-# -----------------------------
-# Prediction Button
-# -----------------------------
-if st.button(" Check Loan Eligibility"):
-    user_data = np.array([[income, loan_amount, credit,
-                            employment, prop_semiurban, prop_urban]])
+if st.button("Check Loan Eligibility"):
+    user_data = np.array(
+        [[income, loan_amount, credit, employment, prop_semiurban, prop_urban]]
+    )
 
     # Impute + Scale
     user_data = imputer.transform(user_data)
@@ -178,31 +189,25 @@ if st.button(" Check Loan Eligibility"):
     prediction = model.predict(user_data)[0]
     confidence = model.predict_proba(user_data)[0][prediction]
 
-    # -----------------------------
-    # Output Section
-    # -----------------------------
-    st.subheader(" Loan Decision")
+    st.subheader("📊 Loan Decision")
 
     if prediction == 1:
         st.success("✅ Loan Approved")
     else:
         st.error("❌ Loan Rejected")
 
-    st.write(f"**Kernel Used:** {kernel}")
-    st.write(f"**Model Confidence:** {confidence:.2%}")
+    st.write(f"✅ **Kernel Used:** {kernel}")
+    st.write(f" **Model Confidence:** {confidence:.2%}")
 
-    # -----------------------------
-    # Business Explanation
-    # -----------------------------
-    st.subheader("📌 Decision Explanation")
+    st.subheader(" Decision Explanation")
 
     if prediction == 1:
         st.write(
             "Based on the applicant’s **credit history and income pattern**, "
-            "the model predicts a **high likelihood of loan repayment**."
+            "the applicant is likely to repay the loan successfully."
         )
     else:
         st.write(
-            "Based on **credit risk and income pattern**, the model predicts "
-            "a **lower likelihood of successful loan repayment**."
+            "Based on **credit risk and income pattern**, "
+            "the applicant is unlikely to repay the loan successfully."
         )
