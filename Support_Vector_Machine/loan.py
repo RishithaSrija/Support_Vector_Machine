@@ -211,3 +211,4 @@ if st.button("Check Loan Eligibility"):
             "Based on **credit risk and income pattern**, "
             "the applicant is unlikely to repay the loan successfully."
         )
+
